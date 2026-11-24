@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loma Verde — a neon-tubes short</title>
+<!-- Neon tubes, in our own words from docs/looks.md: black field, two glow colors, lines draw on, one flicker. Not a Lemo STYLE.md copy. -->
+<style>
+  :root { --bg:#07080c; --ink:#e8f6ff; --muted:#8aa0b5; --mint:#39ffb0; --amber:#ffb020; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:16px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  body { min-height:100dvh; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:12px; padding:12px; }
+  .stage { width:min(100%, calc((100dvh - 148px) * 16 / 9)); aspect-ratio:16/9;
+    background:#000; border:1px solid #1c2430; border-radius:8px; overflow:hidden;
+    position:relative; }
+  canvas { display:block; width:100%; height:100%; }
+  .card { position:absolute; left:6%; bottom:10%; color:var(--ink); text-shadow:0 0 12px #39ffb066;
+    opacity:0; transform:translateY(8px); }
+  .card h1 { margin:0; font-size:clamp(22px, 4.2vw, 64px); font-weight:650; letter-spacing:.04em; }
+  .card p { margin:6px 0 0; color:var(--muted); font-size:clamp(13px, 1.6vw, 22px); letter-spacing:.18em;
+    text-transform:uppercase; }
+  .bar { width:min(960px, 100%); display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button, input[type="range"] { font:inherit; color:var(--ink); }
+  button { min-height:44px; min-width:44px; padding:0 16px; background:#121820; border:1px solid #2a3848;
+    border-radius:8px; cursor:pointer; }
+  button:hover { border-color:var(--mint); }
+  button:focus-visible { outline:2px solid var(--mint); outline-offset:2px; }
+  input[type="range"] { flex:1 1 180px; min-width:140px; height:44px; accent-color:var(--mint); }
+  .time { font-variant-numeric:tabular-nums; color:var(--muted); min-width:9ch; }
+  .note { margin:0; color:var(--muted); font-size:14px; text-align:center; }
+  @media (prefers-reduced-motion: reduce) {
+    .card { transition:none; }
+  }
+</style>
+</head>
+<body>
+<main class="stage" id="stage">
+  <canvas id="view" width="1920" height="1080" aria-label="Neon tubes film: a coffee seed becomes a cup"></canvas>
+  <div class="card" id="card">
+    <h1>Loma Verde</h1>
+    <p>Family coffee · since 1978</p>
+  </div>
+</main>
+<div class="bar">
+  <button id="play" type="button">Play</button>
+  <button id="restart" type="button">Restart</button>
+  <label class="time" for="seek">Time</label>
+  <input id="seek" type="range" min="0" max="15" step="0.01" value="0" aria-label="Jump to a second">
+  <span class="time" id="readout">0.00 / 15.00</span>
+  <span class="time" id="status">Ready</span>
+</div>
+<p class="note">Demo film. 15 seconds, 24 fps, no sound. It holds the last frame.</p>
+<script>
+(function () {
+  var DUR = 15, FPS = 24, reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var canvas = document.getElementById("view");
+  var ctx = canvas.getContext("2d");
+  var card = document.getElementById("card");
+  var playBtn = document.getElementById("play");
+  var seek = document.getElementById("seek");
+  var readout = document.getElementById("readout");
+  var t = 0, playing = false, last = 0;
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function lerp(a, b, u) { return a + (b - a) * clamp(u, 0, 1); }
+  function seg(a, b) { return clamp((t - a) / (b - a), 0, 1); }
+  function ease(u) { return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; }
+
+  function glow(color, blur) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = reduce ? 0 : blur;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+  }
+  function tube(pts, color, width, reveal) {
+    ctx.globalAlpha = 0.16;
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (var g = 1; g < pts.length; g++) ctx.lineTo(pts[g][0], pts[g][1]);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    if (reveal <= 0 || pts.length < 2) return;
+    var lens = [], total = 0, i, dx, dy;
+    for (i = 1; i < pts.length; i++) {
+      dx = pts[i][0] - pts[i - 1][0];
+      dy = pts[i][1] - pts[i - 1][1];
+      lens.push(Math.hypot(dx, dy));
+      total += lens[lens.length - 1];
+    }
+    var budget = total * clamp(reveal, 0, 1);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (i = 0; i < lens.length && budget > 0; i++) {
+      var u = Math.min(1, budget / lens[i]);
+      ctx.lineTo(lerp(pts[i][0], pts[i + 1][0], u), lerp(pts[i][1], pts[i + 1][1], u));
+      budget -= lens[i];
+    }
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    glow(color, 22);
+    ctx.globalAlpha = 0.45;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = Math.max(1.5, width * 0.28);
+    ctx.strokeStyle = "#f7fff8";
+    ctx.stroke();
+  }
+
+  function seedPath() {
+    var c = [960, 620], pts = [], i;
+    for (i = 0; i <= 32; i++) {
+      var a = -Math.PI / 2 + (i / 32) * Math.PI * 2;
+      pts.push([c[0] + Math.cos(a) * 70, c[1] + Math.sin(a) * 110]);
+    }
+    pts.push([c[0], c[1] - 110]);
+    return pts;
+  }
+  function plantStems() {
+    return [
+      [[960, 730], [960, 470], [900, 390], [860, 330]],
+      [[960, 560], [1040, 500], [1100, 430]],
+      [[960, 640], [860, 590], [800, 520]]
+    ];
+  }
+  function cupPath() {
+    return [[760, 470], [800, 760], [1120, 760], [1160, 470]];
+  }
+
+  function draw(now) {
+    if (playing) {
+      var dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+      last = now;
+      t = Math.min(DUR, t + (reduce ? dt * 4 : dt));
+      if (t >= DUR) { t = DUR; playing = false; playBtn.textContent = "Play"; }
+    } else last = now;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, 1920, 1080);
+    ctx.fillStyle = "#05060a";
+    ctx.fillRect(0, 0, 1920, 1080);
+    ctx.strokeStyle = "#122018";
+    ctx.lineWidth = 1;
+    for (var g = 80; g < 1920; g += 80) {
+      ctx.beginPath(); ctx.moveTo(g, 0); ctx.lineTo(g, 1080); ctx.stroke();
+      if (g < 1080) { ctx.beginPath(); ctx.moveTo(0, g); ctx.lineTo(1920, g); ctx.stroke(); }
+    }
+
+    var flicker = (!reduce && t > 1.6 && t < 1.85) ? 0.35 : 1;
+    ctx.globalAlpha = flicker;
+    tube(seedPath(), "#39ffb0", 8, ease(seg(0, 2)));
+    var stems = plantStems();
+    tube(stems[0], "#39ffb0", 8, ease(seg(2, 4.2)));
+    tube(stems[1], "#ffb020", 7, ease(seg(3.1, 5.2)));
+    tube(stems[2], "#39ffb0", 7, ease(seg(3.6, 5.8)));
+    ctx.globalAlpha = 1;
+
+    var steam = ease(seg(6, 8.2));
+    tube([[760, 760], [820, 620], [900, 500], [980, 390]], "#ffb020", 6, steam);
+    tube([[1160, 760], [1100, 600], [1040, 470], [990, 360]], "#ffb020", 6, steam * 0.85);
+    tube(cupPath(), "#39ffb0", 8, ease(seg(7.2, 9.6)));
+    tube([[1160, 560], [1260, 560], [1260, 680], [1160, 680]], "#39ffb0", 7, ease(seg(8.4, 10)));
+
+    var nameIn = ease(seg(10, 12));
+    card.style.opacity = String(nameIn);
+    card.style.transform = "translateY(" + ((1 - nameIn) * 12) + "px)";
+
+    if (seek.valueAsNumber !== t) seek.value = t.toFixed(2);
+    readout.textContent = t.toFixed(2) + " / 15.00";
+    if (playing) requestAnimationFrame(draw);
+  }
+
+  function jump(v) {
+    t = clamp(v, 0, DUR);
+    playing = false;
+    playBtn.textContent = "Play";
+    requestAnimationFrame(draw);
+  }
+  playBtn.addEventListener("click", function () {
+    if (t >= DUR) t = 0;
+    playing = !playing;
+    playBtn.textContent = playing ? "Pause" : "Play";
+    if (playing) requestAnimationFrame(draw);
+  });
+  document.getElementById("restart").addEventListener("click", function () {
+    jump(0);
+    document.getElementById("status").textContent = "At the start";
+  });
+  seek.addEventListener("input", function () { jump(seek.valueAsNumber); });
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
