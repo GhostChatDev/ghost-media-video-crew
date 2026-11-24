@@ -47,25 +47,27 @@
   <button id="play" type="button">Play</button>
   <button id="restart" type="button">Restart</button>
   <label class="time" for="seek">Time</label>
-  <input id="seek" type="range" min="0" max="15" step="0.01" value="0" aria-label="Jump to a second">
+  <input id="seek" type="range" min="0" max="360" step="1" value="0" aria-label="Jump to a frame, 24 per second">
   <span class="time" id="readout">0.00 / 15.00</span>
   <span class="time" id="status">Ready</span>
 </div>
 <p class="note">Demo film. 15 seconds, 24 fps, no sound. It holds the last frame.</p>
 <script>
 (function () {
-  var DUR = 15, FPS = 24, reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var DUR = 15, FPS = 24, FRAMES = DUR * FPS;
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   var canvas = document.getElementById("view");
   var ctx = canvas.getContext("2d");
   var card = document.getElementById("card");
   var playBtn = document.getElementById("play");
   var seek = document.getElementById("seek");
   var readout = document.getElementById("readout");
-  var t = 0, playing = false, last = 0;
+  var frame = 0, playing = false, acc = 0, last = 0;
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function lerp(a, b, u) { return a + (b - a) * clamp(u, 0, 1); }
-  function seg(a, b) { return clamp((t - a) / (b - a), 0, 1); }
+  function time() { return frame / FPS; }
+  function seg(a, b) { return clamp((time() - a) / (b - a), 0, 1); }
   function ease(u) { return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; }
 
   function glow(color, blur) {
@@ -134,11 +136,13 @@
   }
 
   function draw(now) {
-    if (playing) {
+    if (playing && !reduce) {
       var dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
       last = now;
-      t = Math.min(DUR, t + (reduce ? dt * 4 : dt));
-      if (t >= DUR) { t = DUR; playing = false; playBtn.textContent = "Play"; }
+      acc += dt;
+      var step = 1 / FPS;
+      while (acc >= step && frame < FRAMES) { acc -= step; frame += 1; }
+      if (frame >= FRAMES) { frame = FRAMES; acc = 0; playing = false; playBtn.textContent = "Play"; }
     } else last = now;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -152,7 +156,7 @@
       if (g < 1080) { ctx.beginPath(); ctx.moveTo(0, g); ctx.lineTo(1920, g); ctx.stroke(); }
     }
 
-    var flicker = (!reduce && t > 1.6 && t < 1.85) ? 0.35 : 1;
+    var flicker = (!reduce && frame === 40) ? 0.35 : 1;
     ctx.globalAlpha = flicker;
     tube(seedPath(), "#39ffb0", 8, ease(seg(0, 2)));
     var stems = plantStems();
@@ -171,28 +175,37 @@
     card.style.opacity = String(nameIn);
     card.style.transform = "translateY(" + ((1 - nameIn) * 12) + "px)";
 
-    if (seek.valueAsNumber !== t) seek.value = t.toFixed(2);
-    readout.textContent = t.toFixed(2) + " / 15.00";
-    if (playing) requestAnimationFrame(draw);
+    var shown = String(frame);
+    if (seek.value !== shown) seek.value = shown;
+    readout.textContent = "f" + frame + "  " + time().toFixed(2) + " / 15.00";
+    if (playing && !reduce) requestAnimationFrame(draw);
   }
 
-  function jump(v) {
-    t = clamp(v, 0, DUR);
+  function jump(next) {
+    frame = clamp(Math.round(next), 0, FRAMES);
+    acc = 0;
     playing = false;
     playBtn.textContent = "Play";
     requestAnimationFrame(draw);
   }
   playBtn.addEventListener("click", function () {
-    if (t >= DUR) t = 0;
+    if (reduce) {
+      document.getElementById("status").textContent = "Reduced motion: still frame";
+      return;
+    }
+    if (frame >= FRAMES) frame = 0;
     playing = !playing;
     playBtn.textContent = playing ? "Pause" : "Play";
+    acc = 0;
+    last = 0;
     if (playing) requestAnimationFrame(draw);
   });
   document.getElementById("restart").addEventListener("click", function () {
     jump(0);
-    document.getElementById("status").textContent = "At the start";
+    document.getElementById("status").textContent = reduce ? "Reduced motion: still frame" : "At the start";
   });
   seek.addEventListener("input", function () { jump(seek.valueAsNumber); });
+  if (reduce) document.getElementById("status").textContent = "Reduced motion: still frame";
   requestAnimationFrame(draw);
 })();
 </script>
